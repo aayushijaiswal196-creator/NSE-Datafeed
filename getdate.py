@@ -20,4 +20,4 @@ def get_current_date():
         
     return target_date.strftime("%d%m%Y")
 
-#print(get_current_date())
+print(get_current_date())

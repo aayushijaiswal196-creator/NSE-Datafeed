@@ -2,6 +2,9 @@ import os
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
 
 # Define the scope
 scope = ['https://www.googleapis.com/auth/spreadsheets']
@@ -53,6 +56,107 @@ def process_and_upload_data(file_path):
     except Exception as e:
         print(f"Error uploading to Google Sheet: {e}")
         return False
+
+#custom function to upload to cell sheet
+
+def write_to_cell_sheet(spreadsheet_id, sheet_id, cell, value):
+    """
+    Updates a single cell in a Google Sheet with the provided value.
+    """
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scope)
+    try:
+        service = build("sheets", "v4", credentials=creds)
+        range_name = f"{sheet_id}!{cell}"
+        body = {"values": [[value]]}
+        result = (
+            service.spreadsheets()
+            .values()
+            .update(
+                spreadsheetId=spreadsheet_id,
+                range=range_name,
+                valueInputOption="USER_ENTERED",
+                body=body,
+            )
+            .execute()
+        )
+        print(f"{result.get('updatedCells')} cells updated.")
+        return result
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+        return error
+    
+def read_from_cell_sheet(spreadsheet_id, sheet_id, cell):
+    """
+    Reads a single cell from a Google Sheet.
+    """
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scope)
+    try:
+        service = build("sheets", "v4", credentials=creds)
+        range_name = f"{sheet_id}!{cell}"
+        result = (
+            service.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=range_name)
+            .execute()
+        )
+        rows = result.get("values", [])
+        print(f"{len(rows)} rows retrieved")
+        if not rows or not rows[0]:
+            return None
+        return rows[0][0]
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+        return error
+
+def shift_column_range(spreadsheet_id, sheet_id, source_range, destination_range):
+    """
+    Moves values from a source range to a destination range by reading, writing, and then clearing the source.
+    """
+    creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scope)
+    try:
+        service = build("sheets", "v4", credentials=creds)
+        
+        # 1. Get values from source
+        source_full_range = f"{sheet_id}!{source_range}"
+        print(f"Reading from {source_full_range}")
+        get_result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id, range=source_full_range
+        ).execute()
+        values = get_result.get('values', [])
+        
+        if not values:
+            print(f"No data found in {source_full_range}")
+            # Even if source is empty, we should clear destination to reflect the 'move' of empty cells
+            destination_full_range = f"{sheet_id}!{destination_range}"
+            service.spreadsheets().values().clear(
+                spreadsheetId=spreadsheet_id, range=destination_full_range
+            ).execute()
+            return get_result
+        
+        # 2. Update destination
+        destination_full_range = f"{sheet_id}!{destination_range}"
+        print(f"Writing to {destination_full_range}")
+        body = {"values": values}
+        update_result = service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=destination_full_range,
+            valueInputOption="USER_ENTERED",
+            body=body
+        ).execute()
+        print(f"{update_result.get('updatedCells')} cells updated in destination.")
+
+        # 3. Clear source
+        print(f"Clearing source {source_full_range}")
+        service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id, range=source_full_range
+        ).execute()
+        
+        return update_result
+
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+        return error
+
 
 if __name__ == "__main__":
     # For testing purposes, you can uncomment and provide a path
